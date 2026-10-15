@@ -1,0 +1,50 @@
+# CHG-006: custom alert rules for gpu-prod (picked up by Prometheus via the operator).
+# Apply: kubectl apply -f platform/alert-rules.yaml
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: gpu-prod-alerts
+  namespace: monitoring
+spec:
+  groups:
+    - name: gpu-prod.workloads
+      rules:
+        # Catch the OOMKill *before* it happens (INC-001 lesson).
+        - alert: ContainerNearMemoryLimit
+          expr: |
+            (
+              container_memory_working_set_bytes{container!="", container!="POD"}
+              / on (namespace, pod, container)
+              kube_pod_container_resource_limits{resource="memory"}
+            ) > 0.9
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "{{ $labels.namespace }}/{{ $labels.pod }} ({{ $labels.container }}) is at {{ $value | humanizePercentage }} of its memory limit"
+            runbook: "Check kubectl top + recent changes; raise the limit from measured usage or fix the leak before it is OOMKilled (exit 137)."
+
+        # A pod restarting over and over (INC-001 would have fired this).
+        - alert: PodCrashLooping
+          expr: increase(kube_pod_container_status_restarts_total[15m]) > 2
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: "{{ $labels.namespace }}/{{ $labels.pod }} ({{ $labels.container }}) restarted {{ $value | humanize }} times in 15m"
+            runbook: "kubectl get events + describe pod -> Last State reason/exit code (probe failure? OOMKilled 137? app Error 1?)."
+
+    - name: gpu-prod.nodes
+      rules:
+        # Any node that has GPUs and is not Ready = customer GPU capacity lost.
+        - alert: GPUNodeNotReady
+          expr: |
+            (kube_node_status_condition{condition="Ready", status="true"} == 0)
+            and on (node)
+            (kube_node_status_capacity{resource="nvidia_com_gpu"} > 0)
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "GPU node {{ $labels.node }} is NotReady; its GPUs are unavailable to customers"
+            runbook: "kubectl describe node (conditions, kubelet), check the node container/host; cordon + drain if it flaps."

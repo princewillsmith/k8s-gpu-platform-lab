@@ -1,0 +1,63 @@
+# CHG-005: kube-prometheus-stack, slimmed for an 8 GB MacBook (kind cluster gpu-prod).
+# Install: helm upgrade --install monitoring prometheus-community/kube-prometheus-stack \
+#            -n monitoring --create-namespace -f platform/monitoring-values.yaml --wait --timeout 10m
+
+# kind does not expose these control-plane endpoints; scraping them only creates false "target down" alerts.
+kubeEtcd:
+  enabled: false
+kubeControllerManager:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeProxy:
+  enabled: false
+
+prometheus:
+  prometheusSpec:
+    retention: 12h
+    scrapeInterval: 30s
+    resources:
+      requests: { cpu: 100m, memory: 400Mi }
+      limits: { memory: 800Mi }
+    # Pick up our own ServiceMonitors / PrometheusRules, not only the chart's.
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+
+alertmanager:
+  alertmanagerSpec:
+    resources:
+      requests: { cpu: 10m, memory: 32Mi }
+      limits: { memory: 64Mi }
+
+grafana:
+  adminPassword: change-me   # local lab only; set your own. Production uses a Secret or SSO
+  # INC-001 part 2: 256Mi limit -> OOMKilled (exit 137); Grafana 13 peaks ~330Mi at startup.
+  resources:
+    requests: { cpu: 50m, memory: 256Mi }
+    limits: { memory: 512Mi }
+  # INC-001 (6 Oct): Grafana 13 needs ~5 min to start on this busy node; the default
+  # liveness probe (60 s delay) killed it mid-startup -> restart loop. Give it time.
+  livenessProbe:
+    initialDelaySeconds: 300
+  sidecar:
+    dashboards:
+      enabled: true
+
+kube-state-metrics:
+  resources:
+    requests: { cpu: 10m, memory: 32Mi }
+    limits: { memory: 64Mi }
+
+prometheus-node-exporter:
+  # Docker Desktop on macOS can't mount the host root fs into kind nodes.
+  hostRootFsMount:
+    enabled: false
+  resources:
+    requests: { cpu: 10m, memory: 16Mi }
+    limits: { memory: 48Mi }
+
+prometheusOperator:
+  resources:
+    requests: { cpu: 20m, memory: 64Mi }
+    limits: { memory: 128Mi }

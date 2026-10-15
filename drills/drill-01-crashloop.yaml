@@ -1,0 +1,21 @@
+# DRILL-01: a "bad release" that crashes on start, to prove the PodCrashLooping alert fires.
+# Start: kubectl apply -f drills/drill-01-crashloop.yaml
+# Stop:  kubectl delete -f drills/drill-01-crashloop.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: billing-worker
+  namespace: tenant-a
+  labels:
+    app: billing-worker
+    drill: crashloop
+spec:
+  restartPolicy: Always
+  containers:
+    - name: worker
+      image: busybox:1.36
+      # Simulates an app that can't find its config and exits with an error.
+      command: ["sh", "-c", "echo 'FATAL: missing env DATABASE_URL'; sleep 5; exit 1"]
+      resources:
+        requests: { cpu: 10m, memory: 16Mi }
+        limits: { memory: 32Mi }

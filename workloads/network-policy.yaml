@@ -1,0 +1,22 @@
+# CHG-003: zero-trust networking for tenant-a.
+# 1) deny all incoming traffic to every pod in the namespace,
+# 2) then allow only the ingress controller to reach the inference API.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: default-deny-ingress, namespace: tenant-a}
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: allow-ingress-nginx, namespace: tenant-a}
+spec:
+  podSelector:
+    matchLabels: {app: inference-api}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: ingress-nginx}
+      ports: [{port: 80, protocol: TCP}]

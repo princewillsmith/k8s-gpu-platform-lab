@@ -1,0 +1,32 @@
+# CHG-004: a customer GPU training run as a Kubernetes Job.
+# Asks for 2 of the node's 8 GPUs, tolerates the GPU taint, and retries up to 2 times on failure.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: train-llm
+  namespace: tenant-a
+spec:
+  completions: 1
+  backoffLimit: 2
+  activeDeadlineSeconds: 600
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels: {app: train-llm}
+    spec:
+      restartPolicy: Never
+      nodeSelector: {node.platform.lab/pool: gpu}
+      tolerations:
+        - {key: nvidia.com/gpu, operator: Exists, effect: NoSchedule}
+      containers:
+        - name: trainer
+          image: busybox:1.36
+          command: ["sh", "-c"]
+          args:
+            - |
+              echo "Simulated training on $(hostname), GPUs requested: 2"
+              for e in 1 2 3 4 5; do echo "epoch $e/5 loss=0.$((9-e))"; sleep 6; done
+              echo "checkpoint saved, training complete"
+          resources:
+            requests: {cpu: 50m, memory: 32Mi, nvidia.com/gpu: 2}
+            limits: {cpu: 200m, memory: 64Mi, nvidia.com/gpu: 2}

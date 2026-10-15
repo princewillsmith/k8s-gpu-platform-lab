@@ -1,0 +1,2 @@
+args: ["--kubelet-insecure-tls"]   # kind kubelets use self-signed certs
+resources: {requests: {cpu: 20m, memory: 40Mi}}

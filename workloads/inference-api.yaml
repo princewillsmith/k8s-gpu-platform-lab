@@ -1,0 +1,74 @@
+# CHG-002: tenant-a's customer-facing inference API, deployed the production way:
+# 2 replicas, zero-downtime rolling updates, health probes, resource limits,
+# a PodDisruptionBudget (survives node drains) and an autoscaler.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: inference-api
+  namespace: tenant-a
+  labels: {app: inference-api}
+spec:
+  replicas: 2
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: {maxUnavailable: 0, maxSurge: 1}   # never drop below 2 serving pods
+  selector:
+    matchLabels: {app: inference-api}
+  template:
+    metadata:
+      labels: {app: inference-api}
+    spec:
+      nodeSelector: {node.platform.lab/pool: cpu}
+      containers:
+        - name: api
+          image: nginx:1.28-alpine        # v2 (stands in for the model server); rolled out + bad release rolled back on Day 2
+          ports: [{containerPort: 80, name: http}]
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {cpu: 200m, memory: 128Mi}
+          readinessProbe:                 # "ready for traffic?" fail = removed from the Service
+            httpGet: {path: /, port: http}
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          livenessProbe:                  # "still alive?" fail = container restarted
+            httpGet: {path: /, port: http}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata: {name: inference-api, namespace: tenant-a}
+spec:
+  selector: {app: inference-api}
+  ports: [{port: 80, targetPort: http, name: http}]
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata: {name: inference-api, namespace: tenant-a}
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: api.tenant-a.local
+      http:
+        paths:
+          - {path: /, pathType: Prefix, backend: {service: {name: inference-api, port: {number: 80}}}}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata: {name: inference-api, namespace: tenant-a}
+spec:
+  minAvailable: 1                         # a drain may never take the last serving pod
+  selector:
+    matchLabels: {app: inference-api}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata: {name: inference-api, namespace: tenant-a}
+spec:
+  scaleTargetRef: {apiVersion: apps/v1, kind: Deployment, name: inference-api}
+  minReplicas: 2
+  maxReplicas: 4
+  metrics:
+    - type: Resource
+      resource: {name: cpu, target: {type: Utilization, averageUtilization: 70}}
